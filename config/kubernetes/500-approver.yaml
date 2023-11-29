@@ -51,7 +51,6 @@ spec:
         app: manual-approval-gate-approver
         version: "devel"
     spec:
-      serviceAccountName: manual-approval-gate-controller # FIXME: probably not even needed
       containers:
       - name: tekton-taskgroup-approver
         image: ko://github.com/openshift-pipelines/manual-approval-gate/cmd/approver
