@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-RELEASE_VERSION=""
+RELEASE_VERSION="$1"
 
 DOCKER_CMD=${DOCKER_CMD:-docker}
 
@@ -47,18 +47,12 @@ buildImageAndGenerateReleaseYaml() {
     echo "------------------------------------------"
 }
 
-createGitTag() {
-  git tag -a ${RELEASE_VERSION} -m "Manual Approval Gate '${RELEASE_VERSION}'"
-
-  git push upstream ${RELEASE_VERSION}
-}
-
 createNewPreRelease() {
   echo; echo 'Creating New Manual Approval Gate Pre-Release :'
 
-  gh repo set-default git@github.com:openshift-pipelines/manual-approval-gate.git
+  gh repo set-default git@github.com:PuneetPunamiya/manual-approval-gate.git
 
-  gh release create --draft --prerelease -t ${RELEASE_VERSION} ${RELEASE_VERSION}
+  gh release create ${RELEASE_VERSION} --title "Pre-release Version '${RELEASE_VERSION}'" --notes "Description of the prerelease" --draft --prerelease
 
   gh release upload ${RELEASE_VERSION} release-kubernetes.yaml release-openshift.yaml
 }
@@ -66,7 +60,7 @@ createNewPreRelease() {
 createNewBranchAndPush() {
   git checkout -b release-${RELEASE_VERSION}
 
-  git push upstream release-${RELEASE_VERSION}
+  git push origin release-${RELEASE_VERSION}
 }
 
 main() {
@@ -77,19 +71,16 @@ main() {
   done
 
   # Ask the release version to build images
-  getReleaseVersion
+#  getReleaseVersion
+
+  latestTag=$(git describe --tags $(git rev-list --tags --max-count=1))
+  RELEASE_VERSION=${latestTag}
 
   # Build images for db-migration, api and ui
   echo "********************************************"
   info        Build the Images for Manual Approval Gate
   echo "********************************************"
   buildImageAndGenerateReleaseYaml
-
-  # Create and push git tag
-  echo "********************************************"
-  info        Create GIT Tag
-  echo "********************************************"
-  createGitTag
 
   # Create a new pre-release
   echo "********************************************"
