@@ -1,0 +1,86 @@
+# Copyright 2020 The Tekton Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: manual-approval-webhook-certs
+  namespace: tekton-pipelines
+# The data is populated at install time.
+
+---
+# apiVersion: admissionregistration.k8s.io/v1
+# kind: ValidatingWebhookConfiguration
+# metadata:
+#   name: validation.webhook.manual.approval.dev
+#   labels:
+#     app.kubernetes.io/component: webhook
+#     app.kubernetes.io/instance: default
+#     app.kubernetes.io/part-of: tekton-pipelines
+# webhooks:
+#   - admissionReviewVersions: ["v1"]
+#     clientConfig:
+#       service:
+#         name: manual-approval-webhook
+#         namespace: tekton-pipelines
+#     failurePolicy: Fail
+#     sideEffects: None
+#     name: validation.webhook.manual.approval.dev
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: webhook.manual.approval.dev
+  labels:
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+webhooks:
+  - admissionReviewVersions: ["v1"]
+    rules:
+      - operations: [ "UPDATE"]
+        apiGroups: [ "openshift-pipelines.org" ]
+        apiVersions: [ "v1alpha1" ]
+        resources: [ "approvaltask", "approvaltasks" ]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        name: manual-approval-webhook
+        namespace: tekton-pipelines
+    failurePolicy: Fail
+    sideEffects: None
+    name: webhook.manual.approval.dev
+
+---
+# apiVersion: admissionregistration.k8s.io/v1
+# kind: ValidatingWebhookConfiguration
+# metadata:
+#   name: config.webhook.manual.approval.dev
+#   labels:
+#     app.kubernetes.io/component: webhook
+#     app.kubernetes.io/instance: default
+#     app.kubernetes.io/part-of: tekton-pipelines
+# webhooks:
+#   - admissionReviewVersions: ["v1"]
+#     clientConfig:
+#       service:
+#         name: manual-approval-webhook
+#         namespace: tekton-pipelines
+#     failurePolicy: Fail
+#     sideEffects: None
+#     name: config.webhook.manual.approval.dev
+#     objectSelector:
+#       matchLabels:
+#         app.kubernetes.io/part-of: tekton-pipelines

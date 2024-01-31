@@ -1,0 +1,11 @@
+apiVersion: openshift-pipelines.org/v1alpha1
+kind: ApprovalTask
+metadata:
+  name: foo-bar
+spec:
+  name: bar
+  approved: false
+
+#wait
+#false
+#true
