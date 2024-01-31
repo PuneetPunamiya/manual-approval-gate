@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: pr-custom-task-beta-
+spec:
+  pipelineSpec:
+    tasks:
+      - name: before
+        taskSpec:
+          steps:
+            - image: busybox
+              name: before
+              script: echo before wait
+      - name: wait
+        taskRef:
+          apiVersion: openshift-pipelines.org/v1alpha1
+          kind: ApprovalTask
+          params:
+            - name: approvals
+              value:
+                - foo
+                - bar
+                - tekton
+            - name: approvalsRequired
+              value: 2
+        runAfter: ['before']
+      - name: after
+        taskSpec:
+          steps:
+            - image: busybox
+              name: after
+              script: echo after wait
+        runAfter: ['wait']

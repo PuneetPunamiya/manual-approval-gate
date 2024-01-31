@@ -24,7 +24,6 @@ import (
 	v1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -36,9 +35,9 @@ type FakeApprovalTasks struct {
 	ns   string
 }
 
-var approvaltasksResource = schema.GroupVersionResource{Group: "openshiftpipelines.org", Version: "v1alpha1", Resource: "approvaltasks"}
+var approvaltasksResource = v1alpha1.SchemeGroupVersion.WithResource("approvaltasks")
 
-var approvaltasksKind = schema.GroupVersionKind{Group: "openshiftpipelines.org", Version: "v1alpha1", Kind: "ApprovalTask"}
+var approvaltasksKind = v1alpha1.SchemeGroupVersion.WithKind("ApprovalTask")
 
 // Get takes name of the approvalTask, and returns the corresponding approvalTask object, and an error if there is any.
 func (c *FakeApprovalTasks) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.ApprovalTask, err error) {
@@ -95,6 +94,18 @@ func (c *FakeApprovalTasks) Create(ctx context.Context, approvalTask *v1alpha1.A
 func (c *FakeApprovalTasks) Update(ctx context.Context, approvalTask *v1alpha1.ApprovalTask, opts v1.UpdateOptions) (result *v1alpha1.ApprovalTask, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateAction(approvaltasksResource, c.ns, approvalTask), &v1alpha1.ApprovalTask{})
+
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1alpha1.ApprovalTask), err
+}
+
+// UpdateStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
+func (c *FakeApprovalTasks) UpdateStatus(ctx context.Context, approvalTask *v1alpha1.ApprovalTask, opts v1.UpdateOptions) (*v1alpha1.ApprovalTask, error) {
+	obj, err := c.Fake.
+		Invokes(testing.NewUpdateSubresourceAction(approvaltasksResource, "status", c.ns, approvalTask), &v1alpha1.ApprovalTask{})
 
 	if obj == nil {
 		return nil, err

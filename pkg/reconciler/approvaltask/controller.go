@@ -17,7 +17,6 @@ package approvaltask
 
 import (
 	"context"
-
 	"github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask"
 	approvaltaskv1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
 	approvaltaskclient "github.com/openshift-pipelines/manual-approval-gate/pkg/client/injection/client"

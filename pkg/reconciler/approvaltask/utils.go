@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask"
 	v1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
@@ -70,10 +71,11 @@ func initializeCustomRun(ctx context.Context, run *v1beta1.CustomRun) {
 	}
 }
 
-func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.CustomRun) (*metav1.ObjectMeta, *v1alpha1.ApprovalTaskSpec, error) {
+func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.CustomRun) (*v1alpha1.ApprovalTask, error) {
 	logger := logging.FromContext(ctx)
-	approvalTaskMeta := metav1.ObjectMeta{}
-	approvalTaskSpec := v1alpha1.ApprovalTaskSpec{}
+	// approvalTaskMeta := metav1.ObjectMeta{}
+	// approvalTaskSpec := v1alpha1.ApprovalTaskSpec{}
+	approvalTask := v1alpha1.ApprovalTask{}
 
 	if run.Spec.CustomRef != nil {
 		// Use the k8 client to get the ApprovalTask rather than the lister.  This avoids a timing issue where
@@ -82,35 +84,100 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 		tl, err := r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Get(ctx, run.Name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
+				var approvals []v1alpha1.Input
+				var approvalsRequired int
+				var users []string
+
+				// Handle the conditions when approvals and approvalsRequired is not given by the user
+				for _, v := range run.Spec.CustomRef.Params {
+					var pa v1alpha1.Input
+
+					if v.Name == "approvals" {
+						for _, name := range v.Value.ArrayVal {
+							pa.Name = name
+							pa.InputValue = "wait"
+
+							approvals = append(approvals, pa)
+							users = append(users, name)
+						}
+					} else if v.Name == "approvalsRequired" {
+						approvalsRequired, err = strconv.Atoi(v.Value.StringVal)
+						if err != nil {
+							// Handle the error
+							fmt.Println("Error converting string to int:", err)
+						}
+					}
+				}
+
 				approvalTask := &v1alpha1.ApprovalTask{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: run.Name,
 					},
 					Spec: v1alpha1.ApprovalTaskSpec{
-						Name:     run.Name,
-						Approved: "wait",
+						Approvals:         approvals,
+						ApprovalsRequired: approvalsRequired,
 					},
 				}
 
-				tl, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Create(ctx, approvalTask, metav1.CreateOptions{})
+				_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Create(ctx, approvalTask, metav1.CreateOptions{})
 				if err != nil {
-					return nil, nil, err
+					fmt.Println("Error hai na boss creation mein ")
+					return nil, err
 				}
+
+				at, err := r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Get(ctx, run.Name, metav1.GetOptions{})
+				if err != nil {
+					// return nil, nil, nil, err
+					fmt.Println("Bhai err de raha hai---->", err)
+				}
+
+				// TODO:- Probably find a better way
+				status := v1alpha1.ApprovalTaskStatus{
+					ApprovalState: "wait",
+					Approvals:     users,
+					ApprovedBy:    []v1alpha1.Users{},
+				}
+
+				// patchBytes, err := json.Marshal(map[string]interface{}{
+				// 	"status": status,
+				// })
+				// if err != nil {
+				// 	// Handle the error more appropriately based on your application's error handling strategy.
+				// 	fmt.Println("Error marshalling patch data:", err)
+				// 	// return
+				// }
+
+				// subresource := "status"
+				// _, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Patch(ctx, run.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, subresource)
+				// if err != nil {
+				// 	fmt.Println("Did not actually patched it")
+				// }
+
+				at.Status = status
+				fmt.Println("Print the approval task name...", at.Name)
+				_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).UpdateStatus(ctx, at, metav1.UpdateOptions{})
+				if err != nil {
+					fmt.Println("Something wrong", err)
+				}
+
 				logger.Infof("Approval Task %s is created", approvalTask.Name)
 			}
 		}
-		approvalTaskMeta = tl.ObjectMeta
-		approvalTaskSpec = tl.Spec
+
+		approvalTask = *tl
+		// approvalTaskMeta = tl.ObjectMeta
+		// approvalTaskSpec = tl.Spec
+
 	} else if run.Spec.CustomSpec != nil {
 		// FIXME(openshift-pipelines) support embedded spec
-		if err := json.Unmarshal(run.Spec.CustomSpec.Spec.Raw, &approvalTaskSpec); err != nil {
+		if err := json.Unmarshal(run.Spec.CustomSpec.Spec.Raw, &approvalTask.Spec); err != nil {
 			run.Status.MarkCustomRunFailed(v1alpha1.ApprovalTaskRunReasonCouldntGetApprovalTask.String(),
 				"Error retrieving ApprovalTask for Run %s/%s: %s",
 				run.Namespace, run.Name, err)
-			return nil, nil, fmt.Errorf("Error retrieving ApprovalTask for Run %s: %w", fmt.Sprintf("%s/%s", run.Namespace, run.Name), err)
+			return nil, fmt.Errorf("Error retrieving ApprovalTask for Run %s: %w", fmt.Sprintf("%s/%s", run.Namespace, run.Name), err)
 		}
 	}
-	return &approvalTaskMeta, &approvalTaskSpec, nil
+	return &approvalTask, nil
 }
 
 func storeApprovalTaskSpec(status *v1alpha1.ApprovalTaskRunStatus, approvalTaskSpec *v1alpha1.ApprovalTaskSpec) {
@@ -160,4 +227,32 @@ func (c *Reconciler) updateLabelsAndAnnotations(ctx context.Context, run *v1beta
 		return err
 	}
 	return nil
+}
+
+func ApprovalTaskHasFalseInput(approvalTask v1alpha1.ApprovalTask) bool {
+	for _, approval := range approvalTask.Spec.Approvals {
+		if approval.InputValue == "false" {
+			return true // Found an input that is "false"
+		}
+	}
+	return false // No input is "false"
+}
+
+func ApprovalTaskHasTrueInput(approvalTask v1alpha1.ApprovalTask) bool {
+	// Count approvals with input "true"
+	// TODO: fix me
+	if approvalTask.Spec.ApprovalsRequired == 0 {
+		return false
+	}
+	count := 0
+	for _, approval := range approvalTask.Spec.Approvals {
+		if approval.InputValue == "true" {
+			count++
+		}
+	}
+
+	if count == approvalTask.Spec.ApprovalsRequired {
+		return true
+	}
+	return false
 }
