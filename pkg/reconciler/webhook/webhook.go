@@ -1,10 +1,14 @@
 package validation
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
 	"go.uber.org/zap"
+	"gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	admissionlisters "k8s.io/client-go/listers/admissionregistration/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"knative.dev/pkg/apis/duck"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/kmp"
 	"knative.dev/pkg/logging"
@@ -21,7 +26,6 @@ import (
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	certresources "knative.dev/pkg/webhook/certificates/resources"
-	"knative.dev/pkg/webhook/resourcesemantics"
 )
 
 // reconciler implements the AdmissionController for resources
@@ -29,9 +33,9 @@ type reconciler struct {
 	webhook.StatelessAdmissionImpl
 	pkgreconciler.LeaderAwareFuncs
 
-	key         types.NamespacedName
-	path        string
-	handlers    map[schema.GroupVersionKind]resourcesemantics.GenericCRD
+	key  types.NamespacedName
+	path string
+
 	withContext func(context.Context) context.Context
 
 	client       kubernetes.Interface
@@ -51,7 +55,6 @@ var _ webhook.StatelessAdmissionController = (*reconciler)(nil)
 func (ac *reconciler) Reconcile(ctx context.Context, key string) error {
 	logger := logging.FromContext(ctx)
 
-	fmt.Println("It did reconcile bro ...")
 	if !ac.IsLeaderFor(ac.key) {
 		return controller.NewSkipKey(key)
 	}
@@ -59,15 +62,13 @@ func (ac *reconciler) Reconcile(ctx context.Context, key string) error {
 	// Look up the webhook secret, and fetch the CA cert bundle.
 	secret, err := ac.secretlister.Secrets(system.Namespace()).Get(ac.secretName)
 	if err != nil {
-		fmt.Println("Secret mein error aya hai")
 		logger.Errorw("Error fetching secret", zap.Error(err))
 		return err
 	}
 
 	caCert, ok := secret.Data[certresources.CACert]
 	if !ok {
-		fmt.Println("Cert assign karte time error aya hai....")
-		// return fmt.Errorf("secret %q is missing %q key", ac.secretName, certresources.CACert)
+		return fmt.Errorf("secret %q is missing %q key", ac.secretName, certresources.CACert)
 	}
 
 	// Reconcile the webhook configuration.
@@ -82,7 +83,66 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 	fmt.Println("+++++++++++++++++++++++++++++++++++++")
 	fmt.Println("Bhai aa raha hai kya tu ...", request.UserInfo.Username)
 	fmt.Println("+++++++++++++++++++++++++++++++++++++")
-	return nil
+	logger := logging.FromContext(ctx)
+	kind := request.Kind
+
+	newBytes := request.Object.Raw
+	gvk := schema.GroupVersionKind{
+		Group:   kind.Group,
+		Version: kind.Version,
+		Kind:    kind.Kind,
+	}
+
+	if gvk.Group != "openshift-pipelines.org" || gvk.Version != "v1alpha1" || gvk.Kind != "ApprovalTask" {
+		logger.Error("Unhandled kind: ", gvk)
+		fmt.Errorf("unhandled kind: %v", gvk)
+	}
+
+	var newObj v1alpha1.ApprovalTask
+
+	if len(newBytes) != 0 {
+		newDecoder := json.NewDecoder(bytes.NewBuffer(newBytes))
+		if ac.disallowUnknownFields {
+			newDecoder.DisallowUnknownFields()
+		}
+		if err := newDecoder.Decode(&newObj); err != nil {
+			fmt.Errorf("cannot decode incoming new object: %w", err)
+		}
+	}
+
+	// newObj.Params.CurrentUser = request.UserInfo.Username
+	userApprovalDetails := v1alpha1.Users{
+		Name: request.UserInfo.Username,
+	}
+	for _, v := range newObj.Spec.Approvals {
+		if v.Name == request.UserInfo.Username {
+			userApprovalDetails.Approved = v.InputValue
+		}
+	}
+
+	newObj.Status.ApprovedBy = append(newObj.Status.ApprovedBy, userApprovalDetails)
+
+	fmt.Println("Bhai status ke sath aaj bhai")
+	fmt.Println(newObj)
+	fmt.Println("====================================")
+
+	patches, err := roundTripPatch(newBytes, newObj)
+	if err != nil {
+		fmt.Println("Kuch toh gadbad hai daya", err)
+	}
+
+	patchBytes, err := json.Marshal(patches)
+	if err != nil {
+		fmt.Println("Kuch toh gadbad hai daya json mein", err)
+	}
+	return &admissionv1.AdmissionResponse{
+		Patch:   patchBytes,
+		Allowed: true,
+		PatchType: func() *admissionv1.PatchType {
+			pt := admissionv1.PatchTypeJSONPatch
+			return &pt
+		}(),
+	}
 }
 
 func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byte) error {
@@ -90,7 +150,7 @@ func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byt
 	rules := []admissionregistrationv1.RuleWithOperations{
 		{
 			Operations: []admissionregistrationv1.OperationType{
-				admissionregistrationv1.Create,
+				admissionregistrationv1.Update,
 			},
 			Rule: admissionregistrationv1.Rule{
 				APIGroups:   []string{"openshift-pipelines.org"},
@@ -114,34 +174,11 @@ func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byt
 			continue
 		}
 		webhook.Webhooks[i].Rules = rules
-		webhook.Webhooks[i].NamespaceSelector = &metav1.LabelSelector{
-			MatchExpressions: []metav1.LabelSelectorRequirement{{
-				Key:      "operator.tekton.dev/disable-proxy",
-				Operator: metav1.LabelSelectorOpDoesNotExist,
-			}, {
-				// "control-plane" is added to support Azure's AKS, otherwise the controllers fight.
-				// See knative/pkg#1590 for details.
-				Key:      "control-plane",
-				Operator: metav1.LabelSelectorOpDoesNotExist,
-			}},
-		}
-		webhook.Webhooks[i].ObjectSelector = &metav1.LabelSelector{
-			MatchExpressions: []metav1.LabelSelectorRequirement{
-				{
-					Key:      "app.kubernetes.io/managed-by",
-					Values:   []string{"tekton-pipelines", "pipelinesascode.tekton.dev"},
-					Operator: metav1.LabelSelectorOpIn,
-				},
-			},
-		}
 		webhook.Webhooks[i].ClientConfig.CABundle = caCert
 		if webhook.Webhooks[i].ClientConfig.Service == nil {
 			return fmt.Errorf("missing service reference for webhook: %s", wh.Name)
 		}
 		webhook.Webhooks[i].ClientConfig.Service.Path = ptr.String(ac.Path())
-
-		fmt.Println("Rules toh bata de bhai")
-		fmt.Println(webhook.Webhooks[i].Rules)
 	}
 
 	if ok, err := kmp.SafeEqual(configuredWebhook, webhook); err != nil {
@@ -162,4 +199,22 @@ func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byt
 // Path implements AdmissionController
 func (ac *reconciler) Path() string {
 	return ac.path
+}
+
+// roundTripPatch generates the JSONPatch that corresponds to round tripping the given bytes through
+// the Golang type (JSON -> Golang type -> JSON). Because it is not always true that
+// bytes == json.Marshal(json.Unmarshal(bytes)).
+//
+// For example, if bytes did not contain a 'spec' field and the Golang type specifies its 'spec'
+// field without omitempty, then by round tripping through the Golang type, we would have added
+// `'spec': {}`.
+func roundTripPatch(bytes []byte, unmarshalled interface{}) (duck.JSONPatch, error) {
+	if unmarshalled == nil {
+		return duck.JSONPatch{}, nil
+	}
+	marshaledBytes, err := json.Marshal(unmarshalled)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal interface: %w", err)
+	}
+	return jsonpatch.CreatePatch(bytes, marshaledBytes)
 }

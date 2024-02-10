@@ -22,7 +22,6 @@ import (
 
 // +genclient
 // +genclient:noStatus
-// +genreconciler:krshapedlogic=false
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // ApprovalTask is a "wait for manual approval" Task.
@@ -34,10 +33,33 @@ type ApprovalTask struct {
 
 	// Spec holds the desired state of the TaskGroup from the client
 	// +optional
-	Spec ApprovalTaskSpec `json:"spec"`
+	Spec   ApprovalTaskSpec   `json:"spec"`
+	Params []Param            `json:"params,omitempty"`
+	Status ApprovalTaskStatus `json:"status"`
 }
 
 type ApprovalTaskSpec struct {
+	Approvals         []Input `json:"approvals"`
+	ApprovalsRequired int     `json:"approvalsRequired"`
+}
+
+type Input struct {
+	Name       string `json:"name"`
+	InputValue string `json:"input"`
+}
+
+type Param struct {
+	Name  string   `json:"name,omitempty"`
+	Value []string `json:"value,omitempty"`
+}
+
+type ApprovalTaskStatus struct {
+	ApprovalState string   `json:"approvalState"`
+	Approvals     []string `json:"approvals"`
+	ApprovedBy    []Users  `json:"approvedBy"`
+}
+
+type Users struct {
 	Name     string `json:"name"`
 	Approved string `json:"approved"`
 }

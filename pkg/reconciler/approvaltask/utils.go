@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask"
 	v1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
@@ -82,16 +83,44 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 		tl, err := r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Get(ctx, run.Name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
+				var approvals []v1alpha1.Input
+				var approvalsRequired int
+				var users []string
+
+				for _, v := range run.Spec.CustomRef.Params {
+					var pa v1alpha1.Input
+					if v.Name == "approvals" {
+						for _, name := range v.Value.ArrayVal {
+							pa.Name = name
+							pa.InputValue = "wait"
+							approvals = append(approvals, pa)
+							users = append(users, name)
+						}
+					} else if v.Name == "approvalsRequired" {
+						approvalsRequired, err = strconv.Atoi(v.Value.StringVal)
+						if err != nil {
+							// Handle the error
+							fmt.Println("Error converting string to int:", err)
+						}
+					}
+				}
+
 				approvalTask := &v1alpha1.ApprovalTask{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: run.Name,
 					},
 					Spec: v1alpha1.ApprovalTaskSpec{
-						Name:     run.Name,
-						Approved: "wait",
+						Approvals:         approvals,
+						ApprovalsRequired: approvalsRequired,
+					},
+					Status: v1alpha1.ApprovalTaskStatus{
+						ApprovalState: "wait",
+						Approvals:     users,
 					},
 				}
 
+				fmt.Println("Creation obj...")
+				fmt.Println(approvalTask)
 				tl, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Create(ctx, approvalTask, metav1.CreateOptions{})
 				if err != nil {
 					return nil, nil, err
