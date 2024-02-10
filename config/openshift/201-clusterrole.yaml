@@ -94,6 +94,12 @@ rules:
     resources: ["podsecuritypolicies"]
     resourceNames: ["openshift-pipelines"]
     verbs: ["use"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["mutatingwebhookconfigurations"]
+    # This mutating webhook is responsible for applying defaults to tekton objects
+    # as they are received.
+    resourceNames: ["webhook.manual.approval.dev"]
+    verbs: ["get", "list", "update", "patch", "watch"]
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1

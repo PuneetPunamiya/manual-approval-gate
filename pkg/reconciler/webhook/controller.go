@@ -3,7 +3,6 @@ package validation
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
@@ -14,13 +13,11 @@ import (
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
-	"knative.dev/pkg/webhook/resourcesemantics"
 )
 
 func NewAdmissionController(ctx context.Context,
 	name, path string,
 	wc func(context.Context) context.Context,
-	handlers map[schema.GroupVersionKind]resourcesemantics.GenericCRD,
 	disallowUnknownFields bool,
 ) *controller.Impl {
 
@@ -29,7 +26,10 @@ func NewAdmissionController(ctx context.Context,
 	secretInformer := secretinformer.Get(ctx)
 	options := webhook.GetOptions(ctx)
 
-	key := types.NamespacedName{Name: name}
+	key := types.NamespacedName{
+		Namespace: system.Namespace(),
+		Name:      name,
+	}
 
 	c := &reconciler{
 		LeaderAwareFuncs: pkgreconciler.LeaderAwareFuncs{
@@ -40,18 +40,20 @@ func NewAdmissionController(ctx context.Context,
 			},
 		},
 
-		key:                   key,
-		path:                  path,
+		key:  key,
+		path: path,
+
 		withContext:           wc,
 		disallowUnknownFields: disallowUnknownFields,
 		secretName:            options.SecretName,
-		client:                client,
-		mwhlister:             mwhInformer.Lister(),
-		secretlister:          secretInformer.Lister(),
+
+		client:       client,
+		mwhlister:    mwhInformer.Lister(),
+		secretlister: secretInformer.Lister(),
 	}
 
 	logger := logging.FromContext(ctx)
-	cont := controller.NewContext(ctx, c, controller.ControllerOptions{WorkQueueName: "ValidationWebhook", Logger: logger})
+	cont := controller.NewContext(ctx, c, controller.ControllerOptions{WorkQueueName: "DefaultingWebhook", Logger: logger})
 
 	// Reconcile when the named MutatingWebhookConfiguration changes.
 	if _, err := mwhInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{

@@ -135,16 +135,16 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1beta1.CustomRun) 
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, run *v1beta1.CustomRun, status *approvaltaskv1alpha1.ApprovalTaskRunStatus) error {
-	logger := logging.FromContext(ctx)
+	// logger := logging.FromContext(ctx)
 
 	// Get the ApprovalTask referenced by the Run
-	approvaltaskMeta, approvaltaskSpec, err := r.getOrCreateApprovalTask(ctx, run)
+	approvaltaskMeta, approvaltaskSpec, _, err := r.getOrCreateApprovalTask(ctx, run)
 	if err != nil {
 		return err
 	}
 
 	// Store the fetched ApprovalTaskSpec on the Run for auditing
-	storeApprovalTaskSpec(status, approvaltaskSpec)
+	// storeApprovalTaskSpec(status, approvaltaskSpec)
 
 	// Propagate labels and annotations from ApprovalTask to Run.
 	propagateApprovalTaskLabelsAndAnnotations(run, approvaltaskMeta)
@@ -157,19 +157,19 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1beta1.CustomRun, stat
 		return nil
 	}
 
-	switch approvaltaskSpec.Approved {
-	case "wait":
-		logger.Info("Approval task is in wait state")
-		return nil
-	case "false":
-		logger.Infof("Approval task %s is denied", approvaltaskSpec.Name)
-		run.Status.MarkCustomRunFailed(approvaltaskv1alpha1.ApprovalTaskRunReasonFailed.String(), "Approval Task denied")
-		return nil
-	case "true":
-		run.Status.MarkCustomRunSucceeded(approvaltaskv1alpha1.ApprovalTaskRunReasonSucceeded.String(),
-			"TaskRun succeeded")
-		return nil
-	}
+	// switch approvaltaskSpec.Approved {
+	// case "wait":
+	// 	logger.Info("Approval task is in wait state")
+	// 	return nil
+	// case "false":
+	// 	logger.Infof("Approval task %s is denied", approvaltaskSpec.Name)
+	// 	run.Status.MarkCustomRunFailed(approvaltaskv1alpha1.ApprovalTaskRunReasonFailed.String(), "Approval Task denied")
+	// 	return nil
+	// case "true":
+	// 	run.Status.MarkCustomRunSucceeded(approvaltaskv1alpha1.ApprovalTaskRunReasonSucceeded.String(),
+	// 		"TaskRun succeeded")
+	// 	return nil
+	// }
 
 	return nil
 }

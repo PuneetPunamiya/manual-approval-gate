@@ -15,6 +15,12 @@ spec:
         taskRef:
           apiVersion: openshift-pipelines.org/v1alpha1
           kind: ApprovalTask
+          params:
+              - name: approvals
+                value:
+                  - foo
+                  - kubernetes-admin
+                  - tekton
         runAfter: ['before']
       - name: after
         taskSpec:

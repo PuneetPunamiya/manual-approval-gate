@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask"
 	v1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
@@ -70,11 +71,12 @@ func initializeCustomRun(ctx context.Context, run *v1beta1.CustomRun) {
 	}
 }
 
-func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.CustomRun) (*metav1.ObjectMeta, *v1alpha1.ApprovalTaskSpec, error) {
+func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.CustomRun) (*metav1.ObjectMeta, *v1alpha1.ApprovalTaskSpec, v1alpha1.ApprovalTask, error) {
 	logger := logging.FromContext(ctx)
 	approvalTaskMeta := metav1.ObjectMeta{}
 	approvalTaskSpec := v1alpha1.ApprovalTaskSpec{}
 
+	at := v1alpha1.ApprovalTask{}
 	if run.Spec.CustomRef != nil {
 		// Use the k8 client to get the ApprovalTask rather than the lister.  This avoids a timing issue where
 		// the ApprovalTask is not yet in the lister cache if it is created at nearly the same time as the Run.
@@ -82,23 +84,79 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 		tl, err := r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Get(ctx, run.Name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
+				var approvals []v1alpha1.Input
+				var approvalsRequired int
+				var users []string
+
+				for _, v := range run.Spec.CustomRef.Params {
+					var pa v1alpha1.Input
+					if v.Name == "approvals" {
+						for _, name := range v.Value.ArrayVal {
+							pa.Name = name
+							pa.InputValue = "wait"
+
+							approvals = append(approvals, pa)
+							users = append(users, name)
+						}
+					} else if v.Name == "approvalsRequired" {
+						approvalsRequired, err = strconv.Atoi(v.Value.StringVal)
+						if err != nil {
+							// Handle the error
+							fmt.Println("Error converting string to int:", err)
+						}
+					}
+				}
+
 				approvalTask := &v1alpha1.ApprovalTask{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: run.Name,
 					},
 					Spec: v1alpha1.ApprovalTaskSpec{
-						Name:     run.Name,
-						Approved: "wait",
+						Approvals:         approvals,
+						ApprovalsRequired: approvalsRequired,
 					},
 				}
 
-				tl, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Create(ctx, approvalTask, metav1.CreateOptions{})
+				at = *approvalTask
+				fmt.Println("Creation obj...")
+				fmt.Println(approvalTask)
+				_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Create(ctx, approvalTask, metav1.CreateOptions{})
 				if err != nil {
-					return nil, nil, err
+					fmt.Println("Error hai na boss creation mein ")
+					return nil, nil, v1alpha1.ApprovalTask{}, err
 				}
+
+				_, err := r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Get(ctx, run.Name, metav1.GetOptions{})
+				if err != nil {
+					// return nil, nil, nil, err
+					fmt.Println("Bhai err de raha hai---->", err)
+				}
+
+				status := v1alpha1.ApprovalTaskStatus{
+					ApprovalState: "wait",
+					Approvals:     users,
+					ApprovedBy:    []v1alpha1.Users{},
+				}
+
+				patchBytes, err := json.Marshal(map[string]interface{}{
+					"status": status,
+				})
+				if err != nil {
+					// Handle the error more appropriately based on your application's error handling strategy.
+					fmt.Println("Error marshalling patch data:", err)
+					// return
+				}
+
+				subresource := "status"
+				_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).Patch(ctx, run.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, subresource)
+				if err != nil {
+					fmt.Println("Did not actually patched it")
+				}
+
 				logger.Infof("Approval Task %s is created", approvalTask.Name)
 			}
 		}
+
 		approvalTaskMeta = tl.ObjectMeta
 		approvalTaskSpec = tl.Spec
 	} else if run.Spec.CustomSpec != nil {
@@ -107,10 +165,10 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 			run.Status.MarkCustomRunFailed(v1alpha1.ApprovalTaskRunReasonCouldntGetApprovalTask.String(),
 				"Error retrieving ApprovalTask for Run %s/%s: %s",
 				run.Namespace, run.Name, err)
-			return nil, nil, fmt.Errorf("Error retrieving ApprovalTask for Run %s: %w", fmt.Sprintf("%s/%s", run.Namespace, run.Name), err)
+			return nil, nil, v1alpha1.ApprovalTask{}, fmt.Errorf("Error retrieving ApprovalTask for Run %s: %w", fmt.Sprintf("%s/%s", run.Namespace, run.Name), err)
 		}
 	}
-	return &approvalTaskMeta, &approvalTaskSpec, nil
+	return &approvalTaskMeta, &approvalTaskSpec, at, nil
 }
 
 func storeApprovalTaskSpec(status *v1alpha1.ApprovalTaskRunStatus, approvalTaskSpec *v1alpha1.ApprovalTaskSpec) {
