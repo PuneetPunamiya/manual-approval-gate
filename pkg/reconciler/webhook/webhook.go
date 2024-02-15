@@ -95,8 +95,19 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 		fmt.Errorf("unhandled kind: %v", gvk)
 	}
 
-	var newObj v1alpha1.ApprovalTask
+	oldBytes := request.OldObject.Raw
+	var oldObj v1alpha1.ApprovalTask
+	if len(newBytes) != 0 {
+		newDecoder := json.NewDecoder(bytes.NewBuffer(oldBytes))
+		if ac.disallowUnknownFields {
+			newDecoder.DisallowUnknownFields()
+		}
+		if err := newDecoder.Decode(&oldObj); err != nil {
+			fmt.Errorf("cannot decode incoming new object: %w", err)
+		}
+	}
 
+	var newObj v1alpha1.ApprovalTask
 	if len(newBytes) != 0 {
 		newDecoder := json.NewDecoder(bytes.NewBuffer(newBytes))
 		if ac.disallowUnknownFields {
@@ -104,6 +115,31 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 		}
 		if err := newDecoder.Decode(&newObj); err != nil {
 			fmt.Errorf("cannot decode incoming new object: %w", err)
+		}
+	}
+
+	var differences []v1alpha1.Input
+
+	newApprovalsMap := make(map[string]v1alpha1.Input)
+	for _, approval := range newObj.Spec.Approvals {
+		newApprovalsMap[approval.Name+approval.InputValue] = approval
+	}
+
+	// Iterate over oldObj to find what's missing or changed in newObj
+	for _, oldApproval := range oldObj.Spec.Approvals {
+		if _, exists := newApprovalsMap[oldApproval.Name+oldApproval.InputValue]; !exists {
+			differences = append(differences, oldApproval)
+		}
+	}
+
+	fmt.Println(differences)
+	if differences[0].Name != request.UserInfo.Username {
+		return &admissionv1.AdmissionResponse{
+			Allowed: false,
+			PatchType: func() *admissionv1.PatchType {
+				pt := admissionv1.PatchTypeJSONPatch
+				return &pt
+			}(),
 		}
 	}
 
@@ -116,11 +152,6 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 			userApprovalDetails.Approved = v.InputValue
 		}
 	}
-
-	// Adding the user details here
-	newObj.Status.ApprovedBy = append(newObj.Status.ApprovedBy, userApprovalDetails)
-
-	fmt.Println(newObj.Status)
 
 	patches, err := roundTripPatch(newBytes, newObj)
 	if err != nil {
@@ -149,6 +180,7 @@ func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byt
 		{
 			Operations: []admissionregistrationv1.OperationType{
 				admissionregistrationv1.Update,
+				// admissionregistrationv1.Create,
 			},
 			Rule: admissionregistrationv1.Rule{
 				APIGroups:   []string{"openshift-pipelines.org"},
@@ -185,7 +217,6 @@ func (ac *reconciler) reconcileMutatingWebhook(ctx context.Context, caCert []byt
 		logger.Info("Updating webhook")
 		mwhclient := ac.client.AdmissionregistrationV1().MutatingWebhookConfigurations()
 		if _, err := mwhclient.Update(ctx, webhook, metav1.UpdateOptions{}); err != nil {
-			fmt.Println("Error aya hai update mein", err)
 			return fmt.Errorf("failed to update webhook: %w", err)
 		}
 	} else {

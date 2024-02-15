@@ -19,11 +19,13 @@ package approvaltask
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
 	approvaltaskv1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
+	v1alpha1 "github.com/openshift-pipelines/manual-approval-gate/pkg/apis/approvaltask/v1alpha1"
 	approvaltaskclientset "github.com/openshift-pipelines/manual-approval-gate/pkg/client/clientset/versioned"
 	listersapprovaltask "github.com/openshift-pipelines/manual-approval-gate/pkg/client/listers/approvaltask/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
@@ -34,6 +36,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	"go.uber.org/zap"
 	"gomodules.xyz/jsonpatch/v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
@@ -135,41 +138,88 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1beta1.CustomRun) 
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, run *v1beta1.CustomRun, status *approvaltaskv1alpha1.ApprovalTaskRunStatus) error {
-	// logger := logging.FromContext(ctx)
+	logger := logging.FromContext(ctx)
 
 	// Get the ApprovalTask referenced by the Run
-	approvaltaskMeta, approvaltaskSpec, _, err := r.getOrCreateApprovalTask(ctx, run)
+
+	approvalTask, err := r.getOrCreateApprovalTask(ctx, run)
 	if err != nil {
 		return err
 	}
+
+	approvalTaskMeta := &approvalTask.ObjectMeta
+	approvalTaskSpec := approvalTask.Spec
 
 	// Store the fetched ApprovalTaskSpec on the Run for auditing
 	// storeApprovalTaskSpec(status, approvaltaskSpec)
 
 	// Propagate labels and annotations from ApprovalTask to Run.
-	propagateApprovalTaskLabelsAndAnnotations(run, approvaltaskMeta)
+	propagateApprovalTaskLabelsAndAnnotations(run, approvalTaskMeta)
 
 	// Validate ApprovalTask spec
-	if err := approvaltaskSpec.Validate(ctx); err != nil {
+	if err := approvalTaskSpec.Validate(ctx); err != nil {
 		run.Status.MarkCustomRunFailed(approvaltaskv1alpha1.ApprovalTaskRunReasonFailedValidation.String(),
 			"ApprovalTask %s/%s can't be Run; it has an invalid spec: %s",
-			approvaltaskMeta.Namespace, approvaltaskMeta.Name, err)
+			approvalTaskMeta.Namespace, approvalTaskMeta.Name, err)
 		return nil
 	}
 
-	// switch approvaltaskSpec.Approved {
-	// case "wait":
-	// 	logger.Info("Approval task is in wait state")
-	// 	return nil
-	// case "false":
-	// 	logger.Infof("Approval task %s is denied", approvaltaskSpec.Name)
-	// 	run.Status.MarkCustomRunFailed(approvaltaskv1alpha1.ApprovalTaskRunReasonFailed.String(), "Approval Task denied")
-	// 	return nil
-	// case "true":
-	// 	run.Status.MarkCustomRunSucceeded(approvaltaskv1alpha1.ApprovalTaskRunReasonSucceeded.String(),
-	// 		"TaskRun succeeded")
-	// 	return nil
-	// }
+	// ---------------------Updating the approvedBy field in the status ------------------
+	// Temp map to hold current approvals with true input
+	currentApprovals := make(map[string]string)
+	approvalTask.Status.ApprovedBy = []v1alpha1.Users{}
+	// Populate the map with approvals having input true
+	for _, approval := range approvalTask.Spec.Approvals {
+		if approval.InputValue == "true" {
+			currentApprovals[approval.Name] = "true"
+		} else if approval.InputValue == "false" {
+			currentApprovals[approval.Name] = "false"
+		}
+	}
+
+	// Filter the ApprovedBy to only include those that are still true
+	filteredApprovedBy := []v1alpha1.Users{}
+	for name, value := range currentApprovals {
+		filteredApprovedBy = append(filteredApprovedBy, v1alpha1.Users{Name: name, Approved: value})
+	}
+
+	// Update the ApprovedBy list
+	approvalTask.Status.ApprovedBy = filteredApprovedBy
+
+	// -------------------------- Update the approvalState ------------------
+	// False scenario: Check if there is one false and if found mark the approvalstate to false
+	if ApprovalTaskHasFalseInput(*approvalTask) {
+		approvalTask.Status.ApprovalState = "false"
+	} else if ApprovalTaskHasTrueInput(*approvalTask) {
+		fmt.Println("Yaha bhi aa raha hai.....")
+		approvalTask.Status.ApprovalState = "true"
+	}
+
+	// True scenario: Check if it is approved and the approvalRequired limit is reached mark the approval state as true
+	// else mark the approvalstate as wait
+
+	_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).UpdateStatus(ctx, approvalTask, metav1.UpdateOptions{})
+	if err != nil {
+		fmt.Println("Something wrong", err)
+	}
+
+	fmt.Println("==================================")
+	fmt.Println("Print the approval task state....", approvalTask.Status.ApprovalState)
+	fmt.Println("===================================")
+	switch approvalTask.Status.ApprovalState {
+	case "wait":
+		logger.Info("Approval task is in wait state")
+		return nil
+	case "false":
+		logger.Infof("Approval task %s is denied", approvalTaskMeta.Name)
+		run.Status.MarkCustomRunFailed(approvaltaskv1alpha1.ApprovalTaskRunReasonFailed.String(), "Approval Task denied")
+		return nil
+	case "true":
+		fmt.Println("How come it is true")
+		run.Status.MarkCustomRunSucceeded(approvaltaskv1alpha1.ApprovalTaskRunReasonSucceeded.String(),
+			"TaskRun succeeded")
+		return nil
+	}
 
 	return nil
 }

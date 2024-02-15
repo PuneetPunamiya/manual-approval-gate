@@ -42,7 +42,7 @@ rules:
     verbs: [ "get", "list", "create", "update", "delete", "patch", "watch" ]
   - apiGroups: ["openshift-pipelines.org"]
     resources: ["approvaltasks/status"]
-    verbs: ["update", "patch"]
+    verbs: ["update", "patch", "create"]
 
 ---
 kind: ClusterRole
@@ -109,7 +109,7 @@ rules:
     verbs: [ "get", "list", "create", "update", "delete", "patch", "watch" ]
   - apiGroups: ["openshift-pipelines.org"]
     resources: ["approvaltasks/status"]
-    verbs: ["update", "patch"]
+    verbs: ["update", "patch", "create"]
 
 ---
 kind: ClusterRole
