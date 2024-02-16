@@ -152,6 +152,7 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 				// }
 
 				at.Status = status
+				fmt.Println("Print the approval task name...", at.Name)
 				_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).UpdateStatus(ctx, at, metav1.UpdateOptions{})
 				if err != nil {
 					fmt.Println("Something wrong", err)
@@ -237,12 +238,17 @@ func ApprovalTaskHasFalseInput(approvalTask v1alpha1.ApprovalTask) bool {
 
 func ApprovalTaskHasTrueInput(approvalTask v1alpha1.ApprovalTask) bool {
 	// Count approvals with input "true"
+	// TODO: fix me
+	if approvalTask.Spec.ApprovalsRequired == 0 {
+		return false
+	}
 	count := 0
 	for _, approval := range approvalTask.Spec.Approvals {
 		if approval.InputValue == "true" {
 			count++
 		}
 	}
+
 	if count == approvalTask.Spec.ApprovalsRequired {
 		return true
 	}

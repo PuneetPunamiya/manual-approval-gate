@@ -107,6 +107,17 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 		}
 	}
 
+	// Check if username is mentioned in the approval task
+	if !checkIfUserExists(oldObj.Spec.Approvals, request.UserInfo.Username) {
+		return &admissionv1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: "User does not exist in the in the approval list",
+			},
+		}
+	}
+
+	// Check if user is updating the input for his name only
 	var newObj v1alpha1.ApprovalTask
 	if len(newBytes) != 0 {
 		newDecoder := json.NewDecoder(bytes.NewBuffer(newBytes))
@@ -125,7 +136,8 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 		newApprovalsMap[approval.Name+approval.InputValue] = approval
 	}
 
-	// Iterate over oldObj to find what's missing or changed in newObj
+	// TODO: find a better approach
+	// Iterate over old object to find what's missing or changed in newObj
 	for _, oldApproval := range oldObj.Spec.Approvals {
 		if _, exists := newApprovalsMap[oldApproval.Name+oldApproval.InputValue]; !exists {
 			differences = append(differences, oldApproval)
@@ -140,16 +152,6 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 				pt := admissionv1.PatchTypeJSONPatch
 				return &pt
 			}(),
-		}
-	}
-
-	// newObj.Params.CurrentUser = request.UserInfo.Username
-	userApprovalDetails := v1alpha1.Users{
-		Name: request.UserInfo.Username,
-	}
-	for _, v := range newObj.Spec.Approvals {
-		if v.Name == request.UserInfo.Username {
-			userApprovalDetails.Approved = v.InputValue
 		}
 	}
 
@@ -246,4 +248,13 @@ func roundTripPatch(bytes []byte, unmarshalled interface{}) (duck.JSONPatch, err
 		return nil, fmt.Errorf("cannot marshal interface: %w", err)
 	}
 	return jsonpatch.CreatePatch(bytes, marshaledBytes)
+}
+
+func checkIfUserExists(approvals []v1alpha1.Input, currentUser string) bool {
+	for _, approval := range approvals {
+		if approval.Name == currentUser {
+			return true
+		}
+	}
+	return false
 }

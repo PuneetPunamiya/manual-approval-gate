@@ -151,7 +151,7 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1beta1.CustomRun, stat
 	approvalTaskSpec := approvalTask.Spec
 
 	// Store the fetched ApprovalTaskSpec on the Run for auditing
-	// storeApprovalTaskSpec(status, approvaltaskSpec)
+	storeApprovalTaskSpec(status, &approvalTaskSpec)
 
 	// Propagate labels and annotations from ApprovalTask to Run.
 	propagateApprovalTaskLabelsAndAnnotations(run, approvalTaskMeta)
@@ -190,22 +190,16 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1beta1.CustomRun, stat
 	// False scenario: Check if there is one false and if found mark the approvalstate to false
 	if ApprovalTaskHasFalseInput(*approvalTask) {
 		approvalTask.Status.ApprovalState = "false"
+		logger.Infof("Approval task %s is denied", approvalTaskMeta.Name)
 	} else if ApprovalTaskHasTrueInput(*approvalTask) {
-		fmt.Println("Yaha bhi aa raha hai.....")
 		approvalTask.Status.ApprovalState = "true"
 	}
-
-	// True scenario: Check if it is approved and the approvalRequired limit is reached mark the approval state as true
-	// else mark the approvalstate as wait
 
 	_, err = r.approvaltaskClientSet.OpenshiftpipelinesV1alpha1().ApprovalTasks(run.Namespace).UpdateStatus(ctx, approvalTask, metav1.UpdateOptions{})
 	if err != nil {
 		fmt.Println("Something wrong", err)
 	}
 
-	fmt.Println("==================================")
-	fmt.Println("Print the approval task state....", approvalTask.Status.ApprovalState)
-	fmt.Println("===================================")
 	switch approvalTask.Status.ApprovalState {
 	case "wait":
 		logger.Info("Approval task is in wait state")

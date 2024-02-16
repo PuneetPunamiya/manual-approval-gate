@@ -40,6 +40,10 @@ rules:
   - apiGroups: [ "tekton.dev" ]
     resources: [ "runs/finalizers" ]
     verbs: [ "get", "list", "create", "update", "delete", "patch", "watch" ]
+  - apiGroups: ["openshift-pipelines.org"]
+    resources: ["approvaltasks/status"]
+    verbs: ["update", "patch", "create"]
+
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
@@ -100,6 +104,10 @@ rules:
     # as they are received.
     resourceNames: ["webhook.manual.approval.dev"]
     verbs: ["get", "list", "update", "patch", "watch"]
+  - apiGroups: ["openshift-pipelines.org"]
+    resources: ["approvaltasks/status"]
+    verbs: ["update", "patch", "create"]
+
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
