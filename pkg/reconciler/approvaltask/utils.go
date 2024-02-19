@@ -88,8 +88,10 @@ func (r *Reconciler) getOrCreateApprovalTask(ctx context.Context, run *v1beta1.C
 				var approvalsRequired int
 				var users []string
 
+				// Handle the conditions when approvals and approvalsRequired is not given by the user
 				for _, v := range run.Spec.CustomRef.Params {
 					var pa v1alpha1.Input
+
 					if v.Name == "approvals" {
 						for _, name := range v.Value.ArrayVal {
 							pa.Name = name

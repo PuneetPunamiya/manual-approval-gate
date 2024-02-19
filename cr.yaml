@@ -4,7 +4,10 @@ metadata:
   name: foo-bar
 spec:
   name: bar
-  approved: false
+  approved: wait
+  openshiftUsers:
+    - name: foo
+    - name: bar
 
 #wait
 #false

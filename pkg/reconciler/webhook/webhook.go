@@ -129,29 +129,57 @@ func (ac *reconciler) Admit(ctx context.Context, request *admissionv1.AdmissionR
 		}
 	}
 
-	var differences []v1alpha1.Input
+	// var differences []v1alpha1.Input
 
-	newApprovalsMap := make(map[string]v1alpha1.Input)
-	for _, approval := range newObj.Spec.Approvals {
-		newApprovalsMap[approval.Name+approval.InputValue] = approval
-	}
+	// newApprovalsMap := make(map[string]v1alpha1.Input)
+	// for _, approval := range newObj.Spec.Approvals {
+	// 	newApprovalsMap[approval.Name+approval.InputValue] = approval
+	// }
 
-	// TODO: find a better approach
-	// Iterate over old object to find what's missing or changed in newObj
-	for _, oldApproval := range oldObj.Spec.Approvals {
-		if _, exists := newApprovalsMap[oldApproval.Name+oldApproval.InputValue]; !exists {
-			differences = append(differences, oldApproval)
+	// // TODO: find a better approach
+	// // Iterate over old object to find what's missing or changed in newObj
+	// for _, oldApproval := range oldObj.Spec.Approvals {
+	// 	if _, exists := newApprovalsMap[oldApproval.Name+oldApproval.InputValue]; !exists {
+	// 		differences = append(differences, oldApproval)
+	// 	}
+	// }
+
+	// fmt.Println(differences)
+	// if differences[0].Name != request.UserInfo.Username {
+	// 	return &admissionv1.AdmissionResponse{
+	// 		Allowed: false,
+	// 		PatchType: func() *admissionv1.PatchType {
+	// 			pt := admissionv1.PatchTypeJSONPatch
+	// 			return &pt
+	// 		}(),
+	// 	}
+	// }
+
+	var userApprovalChanged bool
+	for i, approval := range oldObj.Spec.Approvals {
+		if approval.Name == request.UserInfo.Username {
+			// Check if the corresponding approval in the new object is the only change.
+			if newObj.Spec.Approvals[i].InputValue != approval.InputValue &&
+				newObj.Spec.Approvals[i].Name == approval.Name {
+				userApprovalChanged = true
+			} else {
+				// If there's any mismatch in other fields, consider it an invalid update.
+				userApprovalChanged = false
+				break
+			}
+		} else if newObj.Spec.Approvals[i].InputValue != approval.InputValue {
+			// If any other user's input is changed, mark it as invalid.
+			userApprovalChanged = false
+			break
 		}
 	}
 
-	fmt.Println(differences)
-	if differences[0].Name != request.UserInfo.Username {
+	if !userApprovalChanged {
 		return &admissionv1.AdmissionResponse{
 			Allowed: false,
-			PatchType: func() *admissionv1.PatchType {
-				pt := admissionv1.PatchTypeJSONPatch
-				return &pt
-			}(),
+			Result: &metav1.Status{
+				Message: "User can only update their own approval status",
+			},
 		}
 	}
 
@@ -257,4 +285,14 @@ func checkIfUserExists(approvals []v1alpha1.Input, currentUser string) bool {
 		}
 	}
 	return false
+}
+
+func checkApprovalsRequired(approvaltask v1alpha1.ApprovalTask) bool {
+	if approvaltask.Status.ApprovalState == "false" {
+		return false
+	}
+	if len(approvaltask.Status.ApprovedBy) == approvaltask.Spec.ApprovalsRequired {
+		return false
+	}
+	return true
 }
