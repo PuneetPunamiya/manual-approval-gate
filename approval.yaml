@@ -1,0 +1,14 @@
+apiVersion: tekton.dev/v1beta1
+kind: CustomRun
+metadata:
+  generateName: wait-customrun-
+spec:
+  retries: 2
+  timeout: 10s
+  customRef:
+    apiVersion: openshift-pipelines.org/v1alpha1
+    kind: ApprovalTask
+    # name: foo
+#  params:
+#    - name: duration
+#      value: 3s

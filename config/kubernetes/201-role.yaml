@@ -66,3 +66,6 @@ rules:
     resources: ["podsecuritypolicies"]
     resourceNames: ["tekton-pipelines"]
     verbs: ["use"]
+  - apiGroups: [ "tekton.dev" ]
+    resources: [ "context" ]
+    verbs: [ "create", "update", "get", "list", "delete" ]
